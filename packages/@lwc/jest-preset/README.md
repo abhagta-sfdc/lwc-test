@@ -18,7 +18,7 @@ yarn add --dev jest-environment-jsdom
 
 ### Configuration
 
-`@lwc/jest-preset` comes with two presets: `@lwc/jest-preset` (default) and `@lwc/jest-preset/ssr` used to test how a LWC component renders on the dom, and the server.
+`@lwc/jest-preset` comes with four presets: `@lwc/jest-preset` (default), `@lwc/jest-preset/ssr`, `@lwc/jest-preset/ssr-server` and `@lwc/jest-preset/ssr-for-hydration`.
 
 #### Testing LWC components rendered on the DOM
 
@@ -65,42 +65,82 @@ Add the `@lwc/jest-preset/ssr` preset to the Jest configuration like so:
 }
 ```
 
-#### LWC DOM and SSR component test setup
+#### SSR component Unit test setup
 
-Jest config only allows one preset per configuration. In order to allow client and server jest tests to live alongside, you might consider creating a new configuration.
+To ensure high-quality rendering for both server and client, separate test suites are necessary:
 
-Example: Use `jest.config.js` for DOM tests (`@lwc/jest-preset`) and create `jest-ssr.config.js` for server tests (`@lwc/jest-preset/ssr`); then add a `test:unit:ssr` script to your `package.json` to run jest with the [`--config` option](https://jestjs.io/docs/cli#--configpath)
+-   **Server-side tests:** Focus on rendering components to static HTML on the server side. These tests are executed in a Node environment, ensuring that server-side logic works as expected without client-side DOM interactions.
+-   **Client-side tests:** Validate how components behave post-hydration in a browser-like environment. These tests are executed using JSDOM to simulate browser behavior.
 
-```json
-{
-    "scripts": {
-        "test:unit": "jest",
-        "test:unit:ssr": "jest --config=jest-ssr.config.js"
-    }
-}
-```
+Combining these tests in the same suite is complex and increases maintenance efforts. By separating them, we ensure better test reliability and coverage.
 
-`jest.config.js` (DOM tests):
+##### Jest configuration
 
-```js
-module.exports = {
-    preset: '@lwc/jest-preset',
-    moduleNameMapper: {
-        '^(example|other)/(.+)$': '<rootDir>/src/test/modules/$1/$2/$2',
-    },
-};
-```
+Jest is the primary tool used for testing, and both "core" and "off-core" repositories rely on it for server-side and client-side tests. The test configuration differs for each environment.
 
-`jest-ssr.config.js` (SSR tests):
+**Server-side configuration** : In server-side testing, we focus on generating static HTML on the server. Below is a sample configuration file for server-side testing:
+
+Example:
+
+`jest.ssr-server.config.js`
 
 ```js
 module.exports = {
-    preset: '@lwc/jest-preset/ssr',
-    moduleNameMapper: {
-        '^(example|other)/(.+)$': '<rootDir>/src/test/modules/$1/$2/$2',
-    },
+    displayName: 'Server-side rendering',
+    preset: '@lwc/jest-preset/ssr-server',
+    testMatch: ['**/*.ssr-server.(spec|test).(js|ts)'],
+    collectCoverage: true,
+    collectCoverageFrom: ['**/*.ssr-server.(spec|test).(js|ts)'],
 };
 ```
+
+**Client-side configuration** : For client-side testing, we validate how the component behaves after the client-side hydration. Below is a sample configuration for client-side-rendering testing.
+
+`jest.ssr-client.config.js`
+
+```js
+module.exports = {
+    displayName: 'SSR with hydration',
+    preset: '@lwc/jest-preset/ssr-for-hydration',
+    testMatch: ['**/*.ssr-client.(spec|test).(js|ts)'],
+    setupFilesAfterEnv: ['./jest.ssr-client.setup.js'],
+    collectCoverage: true,
+    collectCoverageFrom: ['**/*.ssr-client.(spec|test).(js|ts)'],
+};
+```
+
+At present, hydration errors are tracked by monitoring the console.warn event.
+
+`jest.ssr-client.setup.js`
+
+```js
+beforeEach(() => {
+    // Spy on console.warn and intercept warnings
+    jest.spyOn(console, 'warn').mockImplementation((message) => {
+        if (message.includes('Hydration mismatch')) {
+            throw new Error(`Test failed due to hydration mismatch: ${message}`);
+        } else {
+            // If it's not a hydration mismatch, print the warning as usual
+            console.warn(message);
+        }
+    });
+});
+
+afterEach(() => {
+    // Restore original console.warn after each test
+    jest.restoreAllMocks();
+});
+```
+
+**Main Jest configuration** : The main Jest configuration file combines both server-side and client-side test setups using the "projects" feature in Jest.
+
+```js
+module.exports = {
+    projects: ['<rootDir>/jest.ssr-server.config.js', '<rootDir>/jest.ssr-client.config.js'],
+};
+```
+
+To learn more about how to setup and write tests for SSR unit test please refer to this [doc](https://salesforce.quip.com/70uGAbzZ4Tg3)
 
 ### Testing
 
